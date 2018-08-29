@@ -1,0 +1,650 @@
+---
+title: "DRAFT: Baseline iOS Program Metrics for FY18-19"
+author: "Chelsy Xie"
+date: '`r format(Sys.Date(), "%d %B %Y")`'
+output:
+  html_document:
+    # Table of Contents
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    code_folding: hide
+    # Figures
+    fig_width: 10
+    fig_height: 6
+    # Theme
+    theme: flatly
+    highlight: zenburn
+    # Files
+    self_contained: true
+    keep_md: false
+    # Extras
+    mathjax: https://tools-static.wmflabs.org/cdnjs/ajax/libs/mathjax/2.6.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+    md_extensions: +raw_html +markdown_in_html_blocks +tex_math_dollars +fancy_lists +startnum +lists_without_preceding_blankline -autolink_bare_uris
+---
+```{r setup, echo=FALSE, error=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  error = TRUE, echo = FALSE, message = FALSE, warning = FALSE
+)
+library(tidyverse)
+library(magrittr)
+library(crosstalk)
+library(trelliscopejs)
+
+load("data/active_wiki_edit_counts.RData")
+load("data/active_wiki_edit_by_editor.RData")
+
+target_wikis <- c("frwiki", "enwiki", "kowiki", "hiwiki", "cswiki")
+```
+
+In FY18-19, the iOS team will develop contribution features of the app ([project page](https://www.mediawiki.org/wiki/Wikimedia_Apps/Team/iOS/Editing_program)).
+
+This is an initial exploration with two **goals**:
+
+- Write relevant queries that can be productionized later (made to execute daily with data flowing into Druid/Superset).
+- Learn what the program metrics look like right now so we can set our expectations accordingly.
+
+## Metrics
+
+**Primary metrics**
+
+- **Total iOS app edit counts**: Number of non-bot edits which are tagged as made through the iOS app interface.
+- **iOS edits per editor**: For any given time period (monthly/quarterly), of the non-bot registered users that completed at least 1 edit via the iOS app, how many edits did they complete on average (arithmetic mean/median). Edits on other platform won’t affect this metric.
+
+**Health monitoring metrics**
+
+- **Revert rate of iOS edits**: Proportion of "ios app edit"-tagged contributions which have been reverted
+- **iOS active contributor retention rate**: Number of active iOS editors who have made additional edits through the iOS app in the 30 days following their first iOS edit in the given time span (does not include editors who have only made additional edits through other platforms following their first iOS edit)
+- **iOS new contributor retention rate**: Number of new iOS editors who have made additional edits through the iOS app in the 30 days following their first ever iOS edit (does not include editors who have only made additional edits through other platforms following their first iOS edit)
+
+In this report, we will compute the baseline for all languages of Wikipedia, with a focus on our target wikis in the annual plan: French, English, Korean, Hindi and Czech.
+
+**Note**: Platform-specific edit data was not available until June 29 via [T194424](https://phabricator.wikimedia.org/T194424). Prior to the deployment of the patch, all edits made in iOS and Android apps were lumped together under a single change tag "mobile app edit". Since multi-platform usage and platform switching are not common occurrences, any editor who has made a "mobile app edit"-tagged contribution previously is ineligble to be considered a new iOS editor.
+
+## Total iOS app edit counts
+
+Number of non-bot edits which are tagged as made through the iOS app interface. Bot filter are not included in the query since it's very unlikely that a bot would use the app.
+
+**Query**:
+```SQL
+SELECT DATE(date) AS date,
+IFNULL(SUM(edits), 0) AS edits,
+IFNULL(SUM(content_edits), 0) AS content_edits,
+IFNULL(SUM(deleted_edits), 0) AS deleted_edits
+FROM (
+SELECT
+LEFT(rev_timestamp, 8) AS `date`,
+COUNT(*) AS `edits`,
+SUM(page_namespace = 0) AS content_edits,
+SUM(rev_deleted = 1) AS deleted_edits
+FROM revision
+INNER JOIN change_tag ON rev_id = ct_rev_id AND ct_tag = 'ios app edit'
+LEFT JOIN page ON rev_page = page_id
+WHERE rev_timestamp >= '{start_date}'
+AND rev_timestamp < '{end_date}'
+GROUP BY LEFT(rev_timestamp, 8)
+
+UNION ALL
+
+SELECT
+LEFT(ar_timestamp, 8) AS `date`,
+COUNT(*) AS `edits`,
+SUM(ar_namespace = 0) AS content_edits,
+COUNT(*) AS deleted_edits
+FROM archive
+INNER JOIN change_tag ON ar_rev_id = ct_rev_id AND ct_tag = 'ios app edit'
+WHERE ar_timestamp >= '{start_date}'
+AND ar_timestamp < '{end_date}'
+GROUP BY LEFT(ar_timestamp, 8)
+) AS edit_counts
+GROUP BY date
+```
+
+### Target Wikipedia {.tabset}
+
+#### All Edits
+
+```{r target_all_edits_plot}
+active_wiki_edit_counts %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  plotly::plot_ly(x = ~date, y = ~edits, type = 'scatter', mode = 'lines', color = ~language) %>%
+    plotly::layout(title = 'Number of edits made with iOS app, by Wikipedia',
+           xaxis = list(title = 'Date'),
+           yaxis = list (title = 'Wikipedia edits'))
+```
+<br>
+```{r target_all_edits_summary}
+target_wiki_edit_counts_summary <- active_wiki_edit_counts %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(`Daily Average` = mean(edits), `Daily Median` = median(edits), Total = sum(edits))
+
+sketch_target_wiki_edit_counts_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(target_wiki_edit_counts_summary))),
+  DT::tableFooter(c(rep("",4), names(target_wiki_edit_counts_summary)[4]))
+))
+DT::datatable(
+  target_wiki_edit_counts_summary,
+  container = sketch_target_wiki_edit_counts_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(4).footer()).html('Total: '+",
+      "api.column(4).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+)
+```
+
+#### Content Edits
+
+Edit counts in the 0 namespace.
+
+```{r target_content_edits_plot}
+active_wiki_edit_counts %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  plotly::plot_ly(x = ~date, y = ~content_edits, type = 'scatter', mode = 'lines', color = ~language) %>%
+    plotly::layout(title = 'Number of content edits made with iOS app, by Wikipedia',
+           xaxis = list(title = 'Date'),
+           yaxis = list (title = 'Wikipedia content edits'))
+```
+<br>
+```{r target_content_edits_summary}
+target_content_edit_counts_summary <- active_wiki_edit_counts %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(`Daily Average` = mean(content_edits), 
+                   `Daily Median` = median(content_edits), 
+                   `Percentage of All Edits` = sum(content_edits)/sum(edits),
+                   Total = sum(content_edits))
+
+sketch_target_content_edit_counts_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(target_content_edit_counts_summary))),
+  DT::tableFooter(c(rep("",5), names(target_content_edit_counts_summary)[5]))
+))
+DT::datatable(
+  target_content_edit_counts_summary,
+  container = sketch_target_content_edit_counts_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(5).footer()).html('Total: '+",
+      "api.column(5).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage('Percentage of All Edits', 2)
+```
+
+### All Active Wikipedia {.tabset}
+
+#### All Edits
+
+```{r active_all_edits_plot}
+sd_all <- SharedData$new(active_wiki_edit_counts)
+widgets_all <- bscols(widths = 12, filter_select("active_wiki_edit_counts_widget", "Select languages", sd_all, ~language, allLevels = TRUE))
+widgets_all
+plotly::plot_ly(sd_all, x = ~date, y = ~edits, type = 'scatter', mode = 'lines', color = ~language) %>%
+  plotly::layout(title = 'Number of edits made with iOS app, by Wikipedia',
+       xaxis = list(title = 'Date'),
+       yaxis = list (title = 'Wikipedia edits'))
+```
+<br>
+```{r active_all_edits_summary}
+active_wiki_edit_counts_summary <- active_wiki_edit_counts %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(`Daily Average` = mean(edits), `Daily Median` = median(edits), Total = sum(edits))
+
+sketch_active_wiki_edit_counts_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(active_wiki_edit_counts_summary))),
+  DT::tableFooter(c(rep("",4), names(active_wiki_edit_counts_summary)[4]))
+))
+DT::datatable(
+  active_wiki_edit_counts_summary,
+  container = sketch_active_wiki_edit_counts_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(4).footer()).html('Total: '+",
+      "api.column(4).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+)
+```
+
+#### Content Edits
+
+Edit counts in the 0 namespace.
+
+```{r active_content_edits_plot}
+sd_content <- SharedData$new(active_wiki_edit_counts)
+widgets_content <- bscols(widths = 12, filter_select("active_content_edit_counts_widget", "Select languages", sd_content, ~language, allLevels = TRUE))
+widgets_content
+plotly::plot_ly(sd_content, x = ~date, y = ~content_edits, type = 'scatter', mode = 'lines', color = ~language) %>%
+  plotly::layout(title = 'Number of content edits made with iOS app, by Wikipedia',
+         xaxis = list(title = 'Date'),
+         yaxis = list (title = 'Wikipedia content edits'))
+```
+<br>
+```{r active_content_edits_summary}
+active_content_edit_counts_summary <- active_wiki_edit_counts %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(`Daily Average` = mean(content_edits), 
+                   `Daily Median` = median(content_edits), 
+                   `Percentage of All Edits` = sum(content_edits)/sum(edits),
+                   Total = sum(content_edits))
+
+sketch_active_content_edit_counts_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(active_content_edit_counts_summary))),
+  DT::tableFooter(c(rep("",5), names(active_content_edit_counts_summary)[5]))
+))
+DT::datatable(
+  active_content_edit_counts_summary,
+  container = sketch_active_content_edit_counts_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(5).footer()).html('Total: '+",
+      "api.column(5).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage('Percentage of All Edits', 2)
+```
+
+## iOS edits by editor
+
+For any given time period (monthly/quarterly), of the non-bot registered users that completed at least 1 edit via the iOS app, how many edits did they complete on average (arithmetic mean/median). Edits on other platform won’t affect this metric. Bot filter are not included since it's very unlikely that a bot would use the app.
+
+Here we started by counting the number of edits per editor in July 2018 without doing any aggregation, since we want to see the distribution before determine whether we should use mean or median, or other aggregation metrics.
+
+**Query**:
+```SQL
+SELECT month,
+local_user_id,
+IFNULL(user_name, '') AS user_name,
+IFNULL(SUM(edits), 0) AS edits,
+IFNULL(SUM(content_edits), 0) AS content_edits,
+IFNULL(SUM(deleted_edits), 0) AS deleted_edits
+FROM (
+
+SELECT
+LEFT(rev_timestamp, 6) AS `month`,
+rev_user AS `local_user_id`,
+COUNT(*) AS `edits`,
+SUM(page_namespace = 0) AS content_edits,
+SUM(rev_deleted = 1) AS deleted_edits
+FROM revision
+INNER JOIN change_tag ON rev_id = ct_rev_id AND ct_tag = 'ios app edit'
+LEFT JOIN page ON rev_page = page_id
+WHERE LEFT(rev_timestamp, 6) = '201807'
+GROUP BY LEFT(rev_timestamp, 6), rev_user
+
+UNION ALL
+
+SELECT
+LEFT(ar_timestamp, 6) AS `month`,
+ar_user AS `local_user_id`,
+COUNT(*) AS `edits`,
+SUM(ar_namespace = 0) AS content_edits,
+COUNT(*) AS deleted_edits
+FROM archive
+INNER JOIN change_tag ON ar_rev_id = ct_rev_id AND ct_tag = 'ios app edit'
+WHERE LEFT(ar_timestamp, 6) = '201807'
+GROUP BY LEFT(ar_timestamp, 6), ar_user
+
+) AS edit_per_editor
+LEFT JOIN user ON local_user_id = user_id
+GROUP BY month, local_user_id
+```
+
+### Target Wikipedia {.tabset}
+
+#### All Edits
+
+```{r target_edit_by_editor_data}
+target_wiki_edit_by_editor_pdata <- active_wiki_edit_by_editor %>%
+  dplyr::filter(wiki %in% target_wikis, local_user_id != 0) %>%
+  dplyr::mutate(
+    edits = factor(dplyr::case_when(
+      edits < 6 ~ paste(edits, "edits"),
+      edits >= 6 & edits < 11 ~ "6 - 10 edits",
+      edits >= 11 & edits < 16 ~ "11 - 15 edits",
+      edits >= 16 & edits < 21 ~ "16 - 20 edits",
+      edits >= 21 & edits < 31 ~ "21 - 30 edits",
+      edits >= 31 & edits < 51 ~ "31 - 50 edits",
+      edits >= 51 & edits < 101 ~ "51 - 100 edits",
+      edits >= 101 ~ "101+ edits"
+    ),
+    levels = c(paste(1:5, "edits"), "6 - 10 edits", "11 - 15 edits", "16 - 20 edits", "21 - 30 edits",
+               "31 - 50 edits", "51 - 100 edits", "101+ edits"))
+  ) %>%
+  dplyr::group_by(language, edits) %>%
+  dplyr::summarize(n_editor = n()) %>%
+  transform(id = as.integer(factor(language)))
+```
+
+```{r target_edit_by_editor_plot, fig.height=10}
+target_wiki_edit_by_editor_pdata %>%
+plotly::plot_ly(x = ~edits, y = ~n_editor, color = ~language,
+          yaxis = ~paste0("y", id)) %>%
+  plotly::add_bars(width=0.8) %>%
+  plotly::subplot(nrows = 5, shareX = TRUE, titleY = TRUE) %>%
+  plotly::layout(title = 'Distribution of edits per editor in July 2018, by Wikipedia',
+         xaxis = list(title = 'Number of edits'),
+         yaxis = list(title = 'Number of editors'),
+         yaxis2 = list(title = 'Number of editors'),
+         yaxis3 = list(title = 'Number of editors'),
+         yaxis4 = list(title = 'Number of editors'),
+         yaxis5 = list(title = 'Number of editors'),
+         margin = list(b=100))
+```
+<br>
+```{r target_edit_by_editor_summary}
+target_edit_by_editor_summary <- active_wiki_edit_by_editor %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(
+    `Number of registered editors` = length(local_user_id[local_user_id != 0 & edits != 0]),
+    `Average edits/editor` = round(mean(edits[local_user_id != 0]), 2), 
+    `Median edits/editor` = median(edits[local_user_id != 0]),
+    `1 edit editor proportion` = length(local_user_id[local_user_id != 0 & edits == 1]) / `Number of registered editors`,
+    `5+ edit editor proportion` = length(local_user_id[local_user_id != 0 & edits >= 5]) / `Number of registered editors`,
+    `Anonymous edits` = edits[local_user_id == 0],
+    `Anonymous edits proportion` = `Anonymous edits` / sum(edits)
+    )
+    
+sketch_target_edit_by_editor_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(target_edit_by_editor_summary))),
+  DT::tableFooter(c(rep("",2), names(target_edit_by_editor_summary)[2], rep("",4), names(target_edit_by_editor_summary)[7],""))
+))
+DT::datatable(
+  target_edit_by_editor_summary,
+  container = sketch_target_edit_by_editor_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(7).footer()).html('Total: '+",
+      "api.column(7).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('1 edit editor proportion', '5+ edit editor proportion', 'Anonymous edits proportion'), 2)
+```
+<br>
+
+#### Content Edits
+
+```{r target_content_edit_by_editor_data}
+target_content_edit_by_editor_pdata <- active_wiki_edit_by_editor %>%
+  dplyr::filter(wiki %in% target_wikis, local_user_id != 0) %>%
+  dplyr::mutate(
+    content_edits = factor(dplyr::case_when(
+      content_edits < 6 ~ paste(content_edits, "edits"),
+      content_edits >= 6 & content_edits < 11 ~ "6 - 10 edits",
+      content_edits >= 11 & content_edits < 16 ~ "11 - 15 edits",
+      content_edits >= 16 & content_edits < 21 ~ "16 - 20 edits",
+      content_edits >= 21 & content_edits < 31 ~ "21 - 30 edits",
+      content_edits >= 31 & content_edits < 51 ~ "31 - 50 edits",
+      content_edits >= 51 & content_edits < 101 ~ "51 - 100 edits",
+      content_edits >= 101 ~ "101+ edits"
+    ),
+    levels = c(paste(0:5, "edits"), "6 - 10 edits", "11 - 15 edits", "16 - 20 edits", "21 - 30 edits",
+               "31 - 50 edits", "51 - 100 edits", "101+ edits"))
+  ) %>%
+  dplyr::group_by(language, content_edits) %>%
+  dplyr::summarize(n_editor = n()) %>%
+  transform(id = as.integer(factor(language)))
+```
+
+```{r target_content_edit_by_editor_plot, fig.height=10}
+target_content_edit_by_editor_pdata %>%
+plotly::plot_ly(x = ~content_edits, y = ~n_editor, color = ~language,
+          yaxis = ~paste0("y", id)) %>%
+  plotly::add_bars(width=0.8) %>%
+  plotly::subplot(nrows = 5, shareX = TRUE, titleY = TRUE) %>%
+  plotly::layout(title = 'Distribution of content edits per editor in July 2018, by Wikipedia',
+         xaxis = list(title = 'Number of content edits'),
+         yaxis = list(title = 'Number of editors'),
+         yaxis2 = list(title = 'Number of editors'),
+         yaxis3 = list(title = 'Number of editors'),
+         yaxis4 = list(title = 'Number of editors'),
+         yaxis5 = list(title = 'Number of editors'),
+         margin = list(b=100))
+```
+<br>
+```{r target_content_edit_by_editor_summary}
+target_content_edit_by_editor_summary <- active_wiki_edit_by_editor %>%
+  dplyr::filter(wiki %in% target_wikis) %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(
+    `Number of content editors` = length(local_user_id[local_user_id != 0 & content_edits != 0]),
+    `Average content edits/editor` = round(mean(content_edits[local_user_id != 0]), 2), 
+    `Median content edits/editor` = median(content_edits[local_user_id != 0]),
+    `0 content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits == 0]) / length(local_user_id[local_user_id != 0]),
+    `1 content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits == 1]) / length(local_user_id[local_user_id != 0]),
+    `5+ content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits >= 5]) / length(local_user_id[local_user_id != 0]),
+    `Anonymous content edits` = content_edits[local_user_id == 0],
+    `Anonymous content edits proportion` = `Anonymous content edits` / sum(content_edits)
+    )
+    
+sketch_target_content_edit_by_editor_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(target_content_edit_by_editor_summary))),
+  DT::tableFooter(c(rep("",2), names(target_content_edit_by_editor_summary)[2], rep("",5), names(target_content_edit_by_editor_summary)[8],""))
+))
+DT::datatable(
+  target_content_edit_by_editor_summary,
+  container = sketch_target_content_edit_by_editor_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(8).footer()).html('Total: '+",
+      "api.column(8).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('0 content edit editor proportion', '1 content edit editor proportion', '5+ content edit editor proportion', 'Anonymous content edits proportion'), 2)
+```
+<br>
+
+### All Active Wikipedia
+
+#### All Edits
+
+```{r active_edit_by_editor_summary}
+active_edit_by_editor_summary <- active_wiki_edit_by_editor %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(
+    `Number of registered editors` = length(local_user_id[local_user_id != 0 & edits != 0]),
+    `Average edits/editor` = round(mean(edits[local_user_id != 0]), 2), 
+    `Median edits/editor` = median(edits[local_user_id != 0]),
+    `1 edit editor proportion` = length(local_user_id[local_user_id != 0 & edits == 1]) / `Number of registered editors`,
+    `5+ edit editor proportion` = length(local_user_id[local_user_id != 0 & edits >= 5]) / `Number of registered editors`,
+    `Anonymous edits` = ifelse(is.null(edits[local_user_id == 0]), 0, edits[local_user_id == 0]),
+    `Anonymous edits proportion` = `Anonymous edits` / sum(edits)
+    ) %>% 
+  replace(., is.na(.), 0)
+    
+sketch_active_edit_by_editor_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(active_edit_by_editor_summary))),
+  DT::tableFooter(c(rep("",2), names(active_edit_by_editor_summary)[2], rep("",4), names(active_edit_by_editor_summary)[7],""))
+))
+DT::datatable(
+  active_edit_by_editor_summary,
+  container = sketch_active_edit_by_editor_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(7).footer()).html('Total: '+",
+      "api.column(7).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('1 edit editor proportion', '5+ edit editor proportion', 'Anonymous edits proportion'), 2)
+```
+<br>
+
+#### Content Edits
+
+```{r active_content_edit_by_editor_summary}
+active_content_edit_by_editor_summary <- active_wiki_edit_by_editor %>%
+  dplyr::group_by(`Language`=language) %>%
+  dplyr::summarize(
+    `Number of content editors` = length(local_user_id[local_user_id != 0 & content_edits != 0]),
+    `Average content edits/editor` = round(mean(content_edits[local_user_id != 0]), 2), 
+    `Median content edits/editor` = median(content_edits[local_user_id != 0]),
+    `0 content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits == 0]) / length(local_user_id[local_user_id != 0]),
+    `1 content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits == 1]) / length(local_user_id[local_user_id != 0]),
+    `5+ content edit editor proportion` = length(local_user_id[local_user_id != 0 & content_edits >= 5]) / length(local_user_id[local_user_id != 0]),
+    `Anonymous content edits` = ifelse(is.null(content_edits[local_user_id == 0]), 0, content_edits[local_user_id == 0]),
+    `Anonymous content edits proportion` = `Anonymous content edits` / sum(content_edits)
+    ) %>% 
+  replace(., is.na(.), 0)
+    
+sketch_active_content_edit_by_editor_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(active_content_edit_by_editor_summary))),
+  DT::tableFooter(c(rep("",2), names(active_content_edit_by_editor_summary)[2], rep("",5), names(active_content_edit_by_editor_summary)[8],""))
+))
+DT::datatable(
+  active_content_edit_by_editor_summary,
+  container = sketch_active_content_edit_by_editor_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(8).footer()).html('Total: '+",
+      "api.column(8).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('0 content edit editor proportion', '1 content edit editor proportion', '5+ content edit editor proportion', 'Anonymous content edits proportion'), 2)
+```
+<br>
+
+#### Plots
+
+```{r active_edit_by_editor_data}
+active_wiki_edit_by_editor_pdata <- active_wiki_edit_by_editor %>%
+  dplyr::filter(local_user_id != 0) %>%
+  tidyr::gather(key = "edit_type", value = "edit counts", edits, content_edits) %>%
+  dplyr::mutate(
+    `edit counts` = factor(dplyr::case_when(
+      `edit counts` < 6 ~ paste(`edit counts`, "edits"),
+      `edit counts` >= 6 & `edit counts` < 11 ~ "6 - 10 edits",
+      `edit counts` >= 11 & `edit counts` < 16 ~ "11 - 15 edits",
+      `edit counts` >= 16 & `edit counts` < 21 ~ "16 - 20 edits",
+      `edit counts` >= 21 & `edit counts` < 31 ~ "21 - 30 edits",
+      `edit counts` >= 31 & `edit counts` < 51 ~ "31 - 50 edits",
+      `edit counts` >= 51 & `edit counts` < 101 ~ "51 - 100 edits",
+      `edit counts` >= 101 ~ "101+ edits"
+    ), levels = c(paste(0:5, "edits"), "6 - 10 edits", "11 - 15 edits", "16 - 20 edits", "21 - 30 edits",
+               "31 - 50 edits", "51 - 100 edits", "101+ edits")
+    )
+  ) %>%
+  dplyr::group_by(language, edit_type, `edit counts`) %>%
+  dplyr::summarize(n_editor = n())
+```
+
+```{r active_edit_by_editor_plot}
+active_edit_by_editor_plot <- active_wiki_edit_by_editor_pdata %>%
+  ggplot(aes(x=`edit counts`, y=n_editor)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  ggplot2::labs(y = 'Number of editors', x = 'Number of edits') + 
+  theme_bw(base_size=10) +
+  facet_trelliscope(~ language + edit_type, scales = "free", name = 'Distribution of edits per editor in July 2018',
+    width = 2500, nrow = 3, ncol = 1, as_plotly = TRUE, self_contained = TRUE)
+print(active_edit_by_editor_plot)
+```
+
+### Suggestion
+
+From the tables and plots above, the distribution of edits per editor is very right skewed with lots of 1-edit editors, thus we can see the average or median edits per editor are not very descriptive. Therefore, I suggest we:
+
+- Track the proportion of 1-edit editors among all registered editors who edit at least once via iOS app for any given time period (monthly/quarterly). The smaller this number is, the better.
+- Since we consider editors with at least 5 edits per month as active editors (this threshold normally applies to desktop edits, so we should probably find another threshold for mobile editing), we want to track the proportion of 5-edit editors among all registered editors who edit at least once via iOS app monthly. The larger this number is, the better.
+- Since the iOS team's goal is to improve the experience for existing editors, for "iOS heavy wikis" (we still need to define it clearly), we may want to track the number of editors who edit at least once via iOS app for any given time period (monthly/quarterly).
