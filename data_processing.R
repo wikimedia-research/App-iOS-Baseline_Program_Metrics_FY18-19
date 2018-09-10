@@ -1,5 +1,41 @@
 load("data/edits_per_editor_daily.RData")
 all_edits <- read_tsv("data/all_edits.tsv", col_types = "Diiiicl")
+start_date <- min(all_edits$date)
+end_date <- max(all_edits$date)
+
+# Get a list of active wikis
+
+site_matrix <- jsonlite::fromJSON("https://www.mediawiki.org/w/api.php?action=sitematrix&format=json&smtype=language&formatversion=2")$sitematrix
+site_matrix$count <- NULL
+extract_active_wiki <- function(listname) {
+  if ("closed" %in% names(site_matrix[[listname]]$site)){
+    output <- site_matrix[[listname]]$site %>%
+      filter(is.na(closed), code == "wiki") %>%
+      select(-closed)
+  } else if (length(site_matrix[[listname]]$site) == 0){
+    return(NULL)
+  } else {
+    output <- site_matrix[[listname]]$site %>%
+      filter(code == "wiki")
+  }
+
+  if (nrow(output) == 0) {
+    return(NULL)
+  } else {
+    output <- data.frame(
+      language_code = site_matrix[[listname]]$code,
+      language_name = site_matrix[[listname]]$localname,
+      output
+    )
+    return(output)
+  }
+}
+
+active_wikis <- purrr::map_df(
+  .x = names(site_matrix),
+  .f = extract_active_wiki
+)
+
 
 # Total iOS app edit counts
 
@@ -17,6 +53,16 @@ edits_per_editor_monthly <- edits_per_editor_daily %>%
   filter(month != 'Sep') %>%
   group_by(wiki, language, month, local_user_id) %>%
   summarize(edits = sum(edits), content_edits = sum(content_edits))
+
+
+# Revert rate of iOS edits
+# the total number of edits seems wrong...
+revert_rates <- all_edits %>%
+  mutate(Language = active_wikis$language_name[match(wiki, active_wikis$dbname)]) %>%
+  filter(!is.na(is_reverted)) %>%
+  group_by(wiki, Language) %>%
+  summarize(`Number of edits` = length(rev_id), `Revert rate` = sum(is_reverted)/`Number of edits`) %>%
+  ungroup()
 
 
 # Editor retention
@@ -72,7 +118,7 @@ new_ios_editor_retention <- edits_per_editor_daily %>%
 # Active editor (everyone who edit at least once in the selected period)
 active_ios_editor_retention <- edits_per_editor_daily %>%
   filter(local_user_id != 0) %>%
-  group_by(wiki, language, local_user_id) %>%
+  group_by(language, local_user_id) %>%
   summarize(
     total_edits = sum(edits),
     first_edit_date = min(edit_date),

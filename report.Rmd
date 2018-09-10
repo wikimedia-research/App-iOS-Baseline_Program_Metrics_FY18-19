@@ -31,7 +31,7 @@ knitr::opts_chunk$set(
 library(tidyverse)
 library(magrittr)
 library(crosstalk)
-library(trelliscopejs)
+library(glue)
 
 source("data_processing.R")
 
@@ -231,6 +231,7 @@ DT::formatPercentage('Percentage of All Edits', 2)
 
 ### Summary
 
+- Metrics for all wikis and target groups: total edits on ios, total edits for target group (Note that they're affected by enwiki largely)
 - content edit is large proportion of all edits
 - list out baseline for each target wiki, and the sum of them
 - Hindi: too little edits, variation is sensitive
@@ -265,13 +266,15 @@ target_wiki_edit_by_editor_pdata <- edits_per_editor_monthly %>%
 ```
 
 ```{r target_edit_by_editor_plot, fig.height=10}
-ggplot2::ggplot(data = target_wiki_edit_by_editor_pdata, aes(x = edits, y = n_editor, fill = month)) +
+p <- ggplot2::ggplot(data = target_wiki_edit_by_editor_pdata, aes(x = edits, y = n_editor, fill = month)) +
   ggplot2::geom_bar(stat = "identity", position = "dodge") +
   ggplot2::scale_fill_brewer("Month", palette = "Set1") +
   ggplot2::labs(y = 'Number of editors', x = 'Number of edits', 
                 title = 'Distribution of edits per editor per month in July and August 2018, by target Wikipedia') +
   ggplot2::facet_wrap(~language, ncol=1, scales = "free_y") + 
   wmf::theme_facet(axis.text.x = element_text(angle = -20))
+plotly::ggplotly(p) %>%
+  plotly::layout(margin = list(t=100))
 ```
 <br>
 ```{r active_edit_by_editor_summary}
@@ -344,13 +347,15 @@ target_content_edit_by_editor_pdata <- edits_per_editor_monthly %>%
 ```
 
 ```{r target_content_edit_by_editor_plot, fig.height=10}
-ggplot2::ggplot(data = target_content_edit_by_editor_pdata, aes(x = content_edits, y = n_editor, fill = month)) +
+p <- ggplot2::ggplot(data = target_content_edit_by_editor_pdata, aes(x = content_edits, y = n_editor, fill = month)) +
   ggplot2::geom_bar(stat = "identity", position = "dodge") +
   ggplot2::scale_fill_brewer("Month", palette = "Set1") +
   ggplot2::labs(y = 'Number of editors', x = 'Number of content edits', 
                 title = 'Distribution of content edits per editor per month in July and August 2018, by target Wikipedia') +
   ggplot2::facet_wrap(~language, ncol=1, scales = "free_y") + 
   wmf::theme_facet(axis.text.x = element_text(angle = -20))
+plotly::ggplotly(p) %>%
+  plotly::layout(margin = list(t=100))
 ```
 <br>
 ```{r active_content_edit_by_editor_summary}
@@ -409,5 +414,153 @@ DT::formatPercentage(c('0 content edit editor proportion', '1 content edit edito
 From the tables and plots above, the distribution of edits per editor is very right skewed with lots of 1-edit editors, thus we can see the average or median edits per editor are not very descriptive. Therefore, I suggest we:
 
 - Track the proportion of 1-edit editors among all registered editors who edit at least once via iOS app for any given time period (monthly/quarterly). The smaller this number is, the better.
-- Since we consider editors with at least 5 edits per month as active editors (this threshold normally applies to desktop edits, so we should probably find another threshold for mobile editing), we want to track the proportion of 5-edit editors among all registered editors who edit at least once via iOS app monthly. The larger this number is, the better.
+- Since we consider editors with at least 5 edits per month as active editors (https://meta.wikimedia.org/wiki/Research:Active_editor, this threshold normally applies to desktop edits, so we should probably find another threshold for mobile editing), we want to track the proportion of 5-edit editors among all registered editors who edit at least once via iOS app monthly. The larger this number is, the better.
 - Since the iOS team's goal is to improve the experience for existing editors, for "iOS heavy wikis" (we still need to define it clearly), we may want to track the number of editors who edit at least once via iOS app for any given time period (monthly/quarterly).
+
+
+## Revert rate of iOS edits
+
+Non-deleted edits only.
+
+```{r revert_rate_plot, fig.height=10}
+revert_rates_pdata <- revert_rates %>%
+  filter(`Number of edits` > 10) %>%
+  arrange(`Revert rate`) %>%
+  dplyr::mutate(Language=factor(Language, levels = Language))
+ggplot(revert_rates_pdata, aes(x=Language, y=`Revert rate`)) +
+  geom_segment( aes(x=Language, xend=Language, y=0, yend=`Revert rate` ), color=ifelse(revert_rates_pdata$wiki %in% target_wikis, "orange", "grey"), size=ifelse(revert_rates_pdata$wiki %in% target_wikis, 1.3, 0.7) ) +
+  geom_point( color=ifelse(revert_rates_pdata$wiki %in% target_wikis, "orange", "grey"), size=ifelse(revert_rates_pdata$wiki %in% target_wikis, 5, 2) ) +
+  scale_y_continuous(labels = scales::percent_format()) + 
+  ggplot2::geom_text(aes(label = ifelse(revert_rates_pdata$wiki %in% target_wikis, scales::percent(revert_rates_pdata$`Revert rate`), ""), hjust = -0.5), size = 3, color = "orange") +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="none",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  labs(xlab="", ylab="Revert Rate", title = "Revert rate of iOS edits by Wikipedia, with target Wikipedias highlighted", subtitle = glue("Only include wikipedias with more than 10 edits from {start_date} to {end_date}"))
+```
+
+
+```{r revert_rate_summary}
+revert_rates_summary <- revert_rates %>%
+  select(-wiki)
+
+sketch_revert_rates <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(revert_rates_summary))),
+  DT::tableFooter(c(rep("",2), names(revert_rates_summary)[2], ""))
+))
+DT::datatable(
+  revert_rates_summary,
+  container = sketch_revert_rates,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage('Revert rate', 2)
+```
+
+
+## Retention
+
+### New iOS editor retention
+
+A new iOS editors is any account that has made at least one edit with the iOS app since – but not any edits with either app prior to – July 1st 2018 to August 31st 2018. This includes users who have previously edited on desktop and/or mobile web.
+
+caveats: a lot of user haven't reach 60 days window
+
+```{r new_editor_retention_summary}
+new_ios_editor_retention_summary <- new_ios_editor_retention %>%
+  rename('Language'=language, 'Number of editors' = n_users, 
+         'Median edits/editor' = median_edits_per_user, 
+         'Total edits' = total_edits, '2nd-7th day retention' = retention_first6,
+         '8th-14th day retention' = retention_7, '16th-30th day retention' = retention_15, 
+         '31st-60th day retention' = retention_30)
+
+sketch_new_ios_editor_retention_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(new_ios_editor_retention_summary))),
+  DT::tableFooter(c(rep("",2), names(new_ios_editor_retention_summary)[2], "", names(new_ios_editor_retention_summary)[4], rep("",4)))
+))
+DT::datatable(
+  new_ios_editor_retention_summary,
+  container = sketch_new_ios_editor_retention_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(4).footer()).html('Total: '+",
+      "api.column(4).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('2nd-7th day retention', '8th-14th day retention', '16th-30th day retention', '31st-60th day retention'), 2)
+```
+
+### Active iOS editor retention
+
+An active iOS editors is any account that has made at least one edit with the iOS app in July and August 2018.
+
+```{r active_editor_retention_summary}
+active_ios_editor_retention_summary <- active_ios_editor_retention %>%
+  rename('Language'=language, 'Number of editors' = n_users, 
+         'Median edits/editor' = median_edits_per_user, 
+         'Total edits' = total_edits, '2nd-7th day retention' = retention_first6,
+         '8th-14th day retention' = retention_7, '16th-30th day retention' = retention_15, 
+         '31st-60th day retention' = retention_30)
+
+sketch_active_ios_editor_retention_summary <- htmltools::withTags(table(
+  DT::tableHeader(c("", names(active_ios_editor_retention_summary))),
+  DT::tableFooter(c(rep("",2), names(active_ios_editor_retention_summary)[2], "", names(active_ios_editor_retention_summary)[4], rep("",4)))
+))
+DT::datatable(
+  active_ios_editor_retention_summary,
+  container = sketch_active_ios_editor_retention_summary,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10, autoWidth = TRUE, language = list(search = "Filter:"),
+    order = list(list(1, "asc")), dom = "Bfrtip", buttons = c("copy", "csv"),
+    footerCallback = DT::JS(
+      "function( tfoot, data, start, end, display ) {",
+      "var api = this.api(), data;",
+      "$( api.column(2).footer()).html('Total:  '+",
+      "api.column(2).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "$( api.column(4).footer()).html('Total: '+",
+      "api.column(4).data().reduce( function ( a, b ) {",
+      "return a + b;",
+      "} )",
+      ");",
+      "}")
+  )
+) %>%
+DT::formatPercentage(c('2nd-7th day retention', '8th-14th day retention', '16th-30th day retention', '31st-60th day retention'), 2)
+```
