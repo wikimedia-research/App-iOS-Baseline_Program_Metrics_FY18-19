@@ -3,40 +3,6 @@ all_edits <- read_tsv("data/all_edits.tsv", col_types = "Diiiicl")
 start_date <- min(all_edits$date)
 end_date <- max(all_edits$date)
 
-# Get a list of active wikis
-
-site_matrix <- jsonlite::fromJSON("https://www.mediawiki.org/w/api.php?action=sitematrix&format=json&smtype=language&formatversion=2")$sitematrix
-site_matrix$count <- NULL
-extract_active_wiki <- function(listname) {
-  if ("closed" %in% names(site_matrix[[listname]]$site)){
-    output <- site_matrix[[listname]]$site %>%
-      filter(is.na(closed), code == "wiki") %>%
-      select(-closed)
-  } else if (length(site_matrix[[listname]]$site) == 0){
-    return(NULL)
-  } else {
-    output <- site_matrix[[listname]]$site %>%
-      filter(code == "wiki")
-  }
-
-  if (nrow(output) == 0) {
-    return(NULL)
-  } else {
-    output <- data.frame(
-      language_code = site_matrix[[listname]]$code,
-      language_name = site_matrix[[listname]]$localname,
-      output
-    )
-    return(output)
-  }
-}
-
-active_wikis <- purrr::map_df(
-  .x = names(site_matrix),
-  .f = extract_active_wiki
-)
-
-
 # Total iOS app edit counts
 
 active_wiki_edit_counts <- edits_per_editor_daily %>%
@@ -58,7 +24,7 @@ edits_per_editor_monthly <- edits_per_editor_daily %>%
 # Revert rate of iOS edits
 # the total number of edits seems wrong...
 revert_rates <- all_edits %>%
-  mutate(Language = active_wikis$language_name[match(wiki, active_wikis$dbname)]) %>%
+  rename(Language = language) %>%
   filter(!is.na(is_reverted)) %>%
   group_by(wiki, Language) %>%
   summarize(`Number of edits` = length(rev_id), `Revert rate` = sum(is_reverted)/`Number of edits`) %>%

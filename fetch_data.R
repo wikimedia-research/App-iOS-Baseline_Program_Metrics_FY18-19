@@ -77,7 +77,7 @@ DATE(LEFT(ar_timestamp, 8)) AS edit_date,
 ar_namespace AS namespace
 FROM change_tag
 INNER JOIN archive ON (
-archive.ar_id = change_tag.ct_rev_id
+archive.ar_rev_id = change_tag.ct_rev_id
 AND archive.ar_timestamp >= '{start_date}'
 AND archive.ar_timestamp < '{end_date}'
 AND change_tag.ct_tag = 'ios app edit'
@@ -104,7 +104,7 @@ UNION ALL
 SELECT ar_user AS local_user_id
 FROM change_tag
 INNER JOIN archive ON (
-archive.ar_id = change_tag.ct_rev_id
+archive.ar_rev_id = change_tag.ct_rev_id
 AND archive.ar_timestamp < '{start_date}'
 AND change_tag.ct_tag = 'mobile app edit'
 )

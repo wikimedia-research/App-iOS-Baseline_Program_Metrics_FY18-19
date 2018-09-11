@@ -420,8 +420,6 @@ From the tables and plots above, the distribution of edits per editor is very ri
 
 ## Revert rate of iOS edits
 
-Non-deleted edits only.
-
 ```{r revert_rate_plot, fig.height=10}
 revert_rates_pdata <- revert_rates %>%
   filter(`Number of edits` > 10) %>%

@@ -50,17 +50,32 @@ query_vars = dict(
     start_date='20180701',
     end_date=datetime.datetime.today().strftime('%Y%m%d'))
 query = """
+-- Edits made with iOS app on visible pages:
 SELECT
 DATE(LEFT(rev_timestamp, 8)) AS `date`,
 rev_id,
 rev_user AS `local_user_id`,
 page_namespace,
-page_id
+page_id,
+FALSE AS is_deleted
 FROM revision
 INNER JOIN change_tag ON rev_id = ct_rev_id AND ct_tag = 'ios app edit'
 LEFT JOIN page ON rev_page = page_id
 WHERE rev_timestamp >= '{start_date}'
 AND rev_timestamp < '{end_date}'
+UNION ALL
+-- Edits made with iOS app on deleted pages:
+SELECT
+DATE(LEFT(ar_timestamp, 8)) AS `date`,
+ar_rev_id AS rev_id,
+ar_user AS `local_user_id`,
+ar_namespace AS page_namespace,
+ar_page_id AS page_id,
+TRUE AS is_deleted
+FROM archive
+INNER JOIN change_tag ON ar_rev_id = ct_rev_id AND ct_tag = 'ios app edit'
+WHERE ar_timestamp >= '{start_date}'
+AND ar_timestamp < '{end_date}'
 ;
 """
 query = query.format(**query_vars)
@@ -68,11 +83,50 @@ query = query.format(**query_vars)
 # Functions for checking revert info
 
 
-def check_reverted_db(schema, rev_id, page_id):
-    _, reverted, _ = mwreverts.db.check(
-        schema, rev_id=rev_id, page_id=page_id,
-        radius=5, window=48 * 60 * 60)
-    return (reverted is not None)
+def check_reverted_db(wiki, rev_id, page_id, is_deleted):
+    # Checks the revert status of a regular revision
+    def check_regular(schema, rev_id, page_id):
+        _, reverted, _ = mwreverts.db.check(
+            schema, rev_id=rev_id, page_id=page_id,
+            radius=5, window=48 * 60 * 60)
+        return (reverted is not None)
+
+    # Checks the revert status of an archived revision
+    def check_archive(schema, rev_id):
+        _, reverted, _ = mwreverts.db.check_archive(
+            schema, rev_id=rev_id, radius=5, window=48 * 60 * 60)
+        return (reverted is not None)
+
+    try:
+        schema = mwdb.Schema(
+            'mysql+pymysql://analytics-store.eqiad.wmnet/' + wiki +
+            '?read_default_file=/etc/mysql/conf.d/analytics-research-client.cnf')
+        p = ThreadPool(1)
+        if is_deleted:
+            res = p.apply_async(
+                check_archive,
+                kwds={
+                    'schema': schema,
+                    'rev_id': rev_id})
+        else:
+            res = p.apply_async(
+                check_regular,
+                kwds={
+                    'schema': schema,
+                    'rev_id': rev_id,
+                    'page_id': page_id})
+        # Wait timeout seconds for check_reverted_db to complete.
+        out = res.get(timeout)
+        p.close()
+        p.join()
+        return out
+    except multiprocessing.TimeoutError:
+        print(
+            "mwreverts.db.check timeout: failed to retrieve revert info for revision " +
+            str(rev_id))
+        p.terminate()  # kill mwreverts.db.check if it runs more than timeout seconds
+        p.join()
+        return None
 
 
 def check_reverted_api(api_session, rev_id, page_id):
@@ -92,34 +146,18 @@ def check_reverted(wiki, api_session, rev_id, page_id, timeout):
             "API error: revision " +
             str(rev_id) +
             '. Use mwreverts.db.check instead.')
-        try:
-            schema = mwdb.Schema(
-                'mysql+pymysql://analytics-store.eqiad.wmnet/' + wiki +
-                '?read_default_file=/etc/mysql/conf.d/analytics-research-client.cnf')
-            p = ThreadPool(1)
-            res = p.apply_async(
-                check_reverted_db,
-                kwds={
-                    'schema': schema,
-                    'rev_id': rev_id,
-                    'page_id': page_id})
-            # Wait timeout seconds for check_reverted_db to complete.
-            out = res.get(timeout)
-            p.close()
-            p.join()
-            return out
-        except multiprocessing.TimeoutError:
-            print("mwreverts.db.check timeout: failed to retrieve revert info for revision " + str(rev_id))
-            p.terminate()  # kill mwreverts.db.check if it runs more than timeout seconds
-            p.join()
-            return None
+        return check_reverted_db(wiki, rev_id, page_id, is_deleted=False)
 
 
 def iter_check_reverted(df, wiki, api_session, timeout):
     for row in df.itertuples():
         try:
-            df.at[row.Index, 'is_reverted'] = check_reverted(
-                wiki, api_session, row.rev_id, row.page_id, timeout)
+            if row.is_deleted:
+                df.at[row.Index, 'is_reverted'] = check_reverted_db(
+                    wiki, row.rev_id, row.page_id, is_deleted=True)
+            else:
+                df.at[row.Index, 'is_reverted'] = check_reverted(
+                    wiki, api_session, row.rev_id, row.page_id, timeout)
         except RuntimeError:
             print('Failed to get revert info for revision ' + str(row.rev_id))
             continue
@@ -143,10 +181,12 @@ for wiki in active_wikis.dbname:
     try:
         df = pd.read_sql_query(query, conn)
         df['wiki'] = wiki
+        df['language'] = active_wikis.language_name[active_wikis.dbname ==
+                                                    wiki].to_string(index=False)
         df['is_reverted'] = None
 
         api_session = mwapi.Session(active_wikis.url[active_wikis.dbname == wiki].to_string(
-            index=False), user_agent="Revert detection demo <cxie@wikimedia.org>")
+            index=False), user_agent="Revert detection <cxie@wikimedia.org>")
         timeout = 10  # kill mwreverts.db.check if it runs more than 10 seconds
 
         # fetch revert info for each revision
@@ -182,4 +222,8 @@ for wiki in active_wikis.dbname:
 
     conn.close()
 
-all_edits.to_csv('data/all_edits.tsv', sep='\t', index=False, quoting=csv.QUOTE_NONE)
+all_edits.to_csv(
+    'data/all_edits.tsv',
+    sep='\t',
+    index=False,
+    quoting=csv.QUOTE_NONE)
