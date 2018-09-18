@@ -1,33 +1,42 @@
-load("data/edits_per_editor_daily.RData")
-all_edits <- read_tsv("data/all_edits.tsv", col_types = "Diiiicl")
+all_edits <- read_tsv("data/all_edits.tsv", col_types = "Diliiilccl")
 start_date <- min(all_edits$date)
 end_date <- max(all_edits$date)
+
+edits_per_editor_daily <- all_edits %>%
+  group_by(wiki, language, date, local_user_id, new_ios_editor) %>%
+  summarize(edits = length(rev_id),
+            content_edits = sum(namespace == 0)) %>%
+  ungroup()
+
 
 # Total iOS app edit counts
 
 active_wiki_edit_counts <- edits_per_editor_daily %>%
-  group_by(edit_date, wiki, language) %>%
+  group_by(date, wiki, language) %>%
   summarize(edits = sum(edits), content_edits = sum(content_edits)) %>%
   ungroup() %>%
-  complete(edit_date, nesting(wiki, language), fill = list(edits = 0, content_edits = 0))
+  complete(date, nesting(wiki, language), fill = list(edits = 0, content_edits = 0))
 
 
 # iOS monthly edits per editor
 
 edits_per_editor_monthly <- edits_per_editor_daily %>%
-  mutate(month = lubridate::month(edit_date, label = TRUE)) %>%
-  filter(month != 'Sep') %>%
+  mutate(month = lubridate::month(date, label = TRUE)) %>%
+  filter(month != lubridate::month(Sys.Date(), label = TRUE)) %>% # remove the incomplete month
   group_by(wiki, language, month, local_user_id) %>%
-  summarize(edits = sum(edits), content_edits = sum(content_edits))
+  summarize(edits = sum(edits), content_edits = sum(content_edits)) %>%
+  ungroup()
 
 
 # Revert rate of iOS edits
-# the total number of edits seems wrong...
+
 revert_rates <- all_edits %>%
   rename(Language = language) %>%
   filter(!is.na(is_reverted)) %>%
   group_by(wiki, Language) %>%
-  summarize(`Number of edits` = length(rev_id), `Revert rate` = sum(is_reverted)/`Number of edits`) %>%
+  summarize(`Number of edits` = length(rev_id),
+            `Reverted edits` = sum(is_reverted),
+            `Revert rate` = `Reverted edits`/`Number of edits`) %>%
   ungroup()
 
 
@@ -64,21 +73,25 @@ new_ios_editor_retention <- edits_per_editor_daily %>%
   group_by(language, local_user_id) %>%
   summarize(
     total_edits = sum(edits),
-    first_edit_date = min(edit_date),
-    retained_first6 = check_retention(first_edit_date, edit_date, 1, 1, 6), # next 6 days
-    retained_7 = check_retention(first_edit_date, edit_date, 1, 7, 7), # 7 days after a week
-    retained_15 = check_retention(first_edit_date, edit_date, 1, 15, 15), # 15 days after 15 days
-    retained_30 = check_retention(first_edit_date, edit_date, 1, 30, 30) # 30 days after 30 days
+    first_edit_date = min(date),
+    retained_first7 = check_retention(first_edit_date, date, 1, 1, 7), # 1st-7th day following first_edit_date
+    retained_7 = check_retention(first_edit_date, date, 1, 8, 7), # 8th-14th day following first_edit_date
+    retained_first15 = check_retention(first_edit_date, date, 1, 1, 15), # 1st-15th day following first_edit_date
+    retained_15 = check_retention(first_edit_date, date, 1, 16, 15), # 16th-30th day following first_edit_date
+    retained_first30 = check_retention(first_edit_date, date, 1, 1, 30), # 1st-30th day following first_edit_date
+    retained_30 = check_retention(first_edit_date, date, 1, 31, 30), # 31st-60th day following first_edit_date
+    retained_first60 = check_retention(first_edit_date, date, 1, 1, 60) # 1st-60th day following first_edit_date
   ) %>%
-  filter(first_edit_date >= as.Date("2018-07-01"), first_edit_date < as.Date("2018-09-01")) %>% # new editors in Jul&Aug
   summarize(
     n_users = n(),
-    median_edits_per_user = median(total_edits),
     total_edits = sum(total_edits),
-    retention_first6 = mean(retained_first6, na.rm = TRUE),
+    retention_first7 = mean(retained_first7, na.rm = TRUE),
     retention_7 = mean(retained_7, na.rm = TRUE),
+    retention_first15 = mean(retained_first15, na.rm = TRUE),
     retention_15 = mean(retained_15, na.rm = TRUE),
-    retention_30 = mean(retained_30, na.rm = TRUE)
+    retention_first30 = mean(retained_first30, na.rm = TRUE),
+    retention_30 = mean(retained_30, na.rm = TRUE),
+    retention_first60 = mean(retained_first60, na.rm = TRUE)
   )
 
 # Active editor (everyone who edit at least once in the selected period)
@@ -87,19 +100,110 @@ active_ios_editor_retention <- edits_per_editor_daily %>%
   group_by(language, local_user_id) %>%
   summarize(
     total_edits = sum(edits),
-    first_edit_date = min(edit_date),
-    retained_first6 = check_retention(first_edit_date, edit_date, 1, 1, 6), # next 6 days
-    retained_7 = check_retention(first_edit_date, edit_date, 1, 7, 7), # 7 days after a week
-    retained_15 = check_retention(first_edit_date, edit_date, 1, 15, 15), # 15 days after 15 days
-    retained_30 = check_retention(first_edit_date, edit_date, 1, 30, 30) # 30 days after 30 days
+    first_edit_date = min(date),
+    retained_first7 = check_retention(first_edit_date, date, 1, 1, 7), # 1st-7th day following first_edit_date
+    retained_7 = check_retention(first_edit_date, date, 1, 8, 7), # 8th-14th day following first_edit_date
+    retained_first15 = check_retention(first_edit_date, date, 1, 1, 15), # 1st-15th day following first_edit_date
+    retained_15 = check_retention(first_edit_date, date, 1, 16, 15), # 16th-30th day following first_edit_date
+    retained_first30 = check_retention(first_edit_date, date, 1, 1, 30), # 1st-30th day following first_edit_date
+    retained_30 = check_retention(first_edit_date, date, 1, 31, 30), # 31st-60th day following first_edit_date
+    retained_first60 = check_retention(first_edit_date, date, 1, 1, 60) # 1st-60th day following first_edit_date
   ) %>%
-  filter(first_edit_date >= as.Date("2018-07-01"), first_edit_date < as.Date("2018-09-01")) %>% # active editors in Jul&Aug
   summarize(
     n_users = n(),
-    median_edits_per_user = median(total_edits),
     total_edits = sum(total_edits),
-    retention_first6 = mean(retained_first6, na.rm = TRUE),
+    retention_first7 = mean(retained_first7, na.rm = TRUE),
     retention_7 = mean(retained_7, na.rm = TRUE),
+    retention_first15 = mean(retained_first15, na.rm = TRUE),
     retention_15 = mean(retained_15, na.rm = TRUE),
-    retention_30 = mean(retained_30, na.rm = TRUE)
+    retention_first30 = mean(retained_first30, na.rm = TRUE),
+    retention_30 = mean(retained_30, na.rm = TRUE),
+    retention_first60 = mean(retained_first60, na.rm = TRUE)
   )
+
+# Weekly retention of July editors for 6 weeks
+
+new_editor_6week_retain <- edits_per_editor_daily %>%
+  filter(new_ios_editor == TRUE, local_user_id != 0) %>%
+  group_by(language, local_user_id) %>%
+  summarize(
+    first_edit_date = min(date),
+    retained_week1 = check_retention(first_edit_date, date, 1, 1, 7),
+    retained_week2 = check_retention(first_edit_date, date, 1, 8, 7),
+    retained_week3 = check_retention(first_edit_date, date, 1, 15, 7),
+    retained_week4 = check_retention(first_edit_date, date, 1, 22, 7),
+    retained_week5 = check_retention(first_edit_date, date, 1, 29, 7),
+    retained_week6 = check_retention(first_edit_date, date, 1, 36, 7)
+  ) %>%
+  gather(key = "Week", value = "retained", -language, -local_user_id, -first_edit_date) %>%
+  mutate(Week = as.numeric(gsub("retained_week", "", Week)))
+new_editor_weekly_retention <- new_editor_6week_retain %>%
+  group_by(language) %>%
+  filter(length(unique(local_user_id)) > 30 | language %in% target_wiki_languages) %>%
+  group_by(language, Week) %>%
+  summarize(
+    total_editors = sum(!is.na(retained)),
+    `Retained Editors` = sum(retained, na.rm = TRUE)
+  ) %>%
+  ungroup %>%
+  cbind(as.data.frame(binom:::binom.confint(x=.$`Retained Editors`, n = .$total_editors, methods = "prop.test")[, c("mean", "lower", "upper")]))
+new_editor_weekly_retention <- new_editor_weekly_retention %>%
+  rbind(
+    new_editor_weekly_retention %>%
+      group_by(Week) %>%
+      summarize_all(mean) %>%
+      mutate(language = "Average*"),
+    new_editor_6week_retain %>%
+      group_by(Week) %>%
+      summarize(
+        total_editors = sum(!is.na(retained)),
+        `Retained Editors` = sum(retained, na.rm = TRUE)
+      ) %>%
+      ungroup %>%
+      cbind(as.data.frame(binom:::binom.confint(x=.$`Retained Editors`, n = .$total_editors, methods = "prop.test")[, c("mean", "lower", "upper")])) %>%
+      mutate(language = "Global*")
+  ) %>%
+  rename("Retention" = mean, "Language" = language)
+
+
+active_editor_6week_retain <- edits_per_editor_daily %>%
+  filter(local_user_id != 0) %>%
+  group_by(language, local_user_id) %>%
+  summarize(
+    first_edit_date = min(date),
+    retained_week1 = check_retention(first_edit_date, date, 1, 1, 7),
+    retained_week2 = check_retention(first_edit_date, date, 1, 8, 7),
+    retained_week3 = check_retention(first_edit_date, date, 1, 15, 7),
+    retained_week4 = check_retention(first_edit_date, date, 1, 22, 7),
+    retained_week5 = check_retention(first_edit_date, date, 1, 29, 7),
+    retained_week6 = check_retention(first_edit_date, date, 1, 36, 7)
+  ) %>%
+  gather(key = "Week", value = "retained", -language, -local_user_id, -first_edit_date) %>%
+  mutate(Week = as.numeric(gsub("retained_week", "", Week)))
+active_editor_weekly_retention <- active_editor_6week_retain %>%
+  group_by(language) %>%
+  filter(length(unique(local_user_id)) > 50 | language %in% target_wiki_languages) %>%
+  group_by(language, Week) %>%
+  summarize(
+    total_editors = sum(!is.na(retained)),
+    `Retained Editors` = sum(retained, na.rm = TRUE)
+  ) %>%
+  ungroup %>%
+  cbind(as.data.frame(binom:::binom.confint(x=.$`Retained Editors`, n = .$total_editors, methods = "prop.test")[, c("mean", "lower", "upper")]))
+active_editor_weekly_retention <- active_editor_weekly_retention %>%
+  rbind(
+    active_editor_weekly_retention %>%
+      group_by(Week) %>%
+      summarize_all(mean) %>%
+      mutate(language = "Average*"),
+    active_editor_6week_retain %>%
+      group_by(Week) %>%
+      summarize(
+        total_editors = sum(!is.na(retained)),
+        `Retained Editors` = sum(retained, na.rm = TRUE)
+      ) %>%
+      ungroup %>%
+      cbind(as.data.frame(binom:::binom.confint(x=.$`Retained Editors`, n = .$total_editors, methods = "prop.test")[, c("mean", "lower", "upper")])) %>%
+      mutate(language = "Global*")
+  ) %>%
+  rename("Retention" = mean, "Language" = language)

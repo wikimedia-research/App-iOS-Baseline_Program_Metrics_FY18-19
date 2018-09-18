@@ -50,32 +50,74 @@ query_vars = dict(
     start_date='20180701',
     end_date=datetime.datetime.today().strftime('%Y%m%d'))
 query = """
+SELECT
+`date`,
+ios_app_edits.local_user_id AS local_user_id,
+IFNULL(previous_app_editors.new_ios_editor, 'TRUE') AS new_ios_editor,
+rev_id,
+namespace,
+page_id,
+is_deleted
+FROM (
 -- Edits made with iOS app on visible pages:
 SELECT
 DATE(LEFT(rev_timestamp, 8)) AS `date`,
+rev_user AS local_user_id,
 rev_id,
-rev_user AS `local_user_id`,
-page_namespace,
+page.page_namespace AS namespace,
 page_id,
 FALSE AS is_deleted
-FROM revision
-INNER JOIN change_tag ON rev_id = ct_rev_id AND ct_tag = 'ios app edit'
-LEFT JOIN page ON rev_page = page_id
-WHERE rev_timestamp >= '{start_date}'
-AND rev_timestamp < '{end_date}'
+FROM change_tag
+INNER JOIN revision ON (
+revision.rev_id = change_tag.ct_rev_id
+AND revision.rev_timestamp >= '{start_date}'
+AND revision.rev_timestamp < '{end_date}'
+AND change_tag.ct_tag = 'ios app edit'
+)
+LEFT JOIN page ON revision.rev_page = page.page_id
 UNION ALL
 -- Edits made with iOS app on deleted pages:
 SELECT
 DATE(LEFT(ar_timestamp, 8)) AS `date`,
+ar_user AS local_user_id,
 ar_rev_id AS rev_id,
-ar_user AS `local_user_id`,
-ar_namespace AS page_namespace,
+ar_namespace AS namespace,
 ar_page_id AS page_id,
 TRUE AS is_deleted
-FROM archive
-INNER JOIN change_tag ON ar_rev_id = ct_rev_id AND ct_tag = 'ios app edit'
-WHERE ar_timestamp >= '{start_date}'
-AND ar_timestamp < '{end_date}'
+FROM change_tag
+INNER JOIN archive ON (
+archive.ar_rev_id = change_tag.ct_rev_id
+AND archive.ar_timestamp >= '{start_date}'
+AND archive.ar_timestamp < '{end_date}'
+AND change_tag.ct_tag = 'ios app edit'
+)
+) AS ios_app_edits
+LEFT JOIN (
+-- Editors who have used a mobile app (Android/iOS)
+-- to edit Wikipedia before the start_date:
+SELECT DISTINCT local_user_id,
+'FALSE' as new_ios_editor
+FROM (
+-- Editors who have previously used a mobile app to edit visible pages:
+SELECT rev_user AS local_user_id
+FROM change_tag
+INNER JOIN revision ON (
+revision.rev_id = change_tag.ct_rev_id
+AND revision.rev_timestamp < '{start_date}'
+AND change_tag.ct_tag = 'mobile app edit'
+)
+UNION ALL
+-- Editors who have previously used a mobile app to edit deleted pages:
+SELECT ar_user AS local_user_id
+FROM change_tag
+INNER JOIN archive ON (
+archive.ar_rev_id = change_tag.ct_rev_id
+AND archive.ar_timestamp < '{start_date}'
+AND change_tag.ct_tag = 'mobile app edit'
+)
+) AS combined_revisions
+) AS previous_app_editors
+ON previous_app_editors.local_user_id = ios_app_edits.local_user_id
 ;
 """
 query = query.format(**query_vars)
@@ -115,7 +157,7 @@ def check_reverted_db(wiki, rev_id, page_id, is_deleted):
                     'schema': schema,
                     'rev_id': rev_id,
                     'page_id': page_id})
-        # Wait timeout seconds for check_reverted_db to complete.
+        # Wait timeout seconds for check_archive or check_regular to complete.
         out = res.get(timeout)
         p.close()
         p.join()
@@ -137,7 +179,7 @@ def check_reverted_api(api_session, rev_id, page_id):
 
 
 def check_reverted(wiki, api_session, rev_id, page_id, timeout):
-    # Use mwreverts.api.check first. If not work, use mwreverts.db.check
+    # Use mwreverts.api.check first. If not work, use check_reverted_db
     try:
         out = check_reverted_api(api_session, rev_id, page_id)
         return out
@@ -187,7 +229,7 @@ for wiki in active_wikis.dbname:
 
         api_session = mwapi.Session(active_wikis.url[active_wikis.dbname == wiki].to_string(
             index=False), user_agent="Revert detection <cxie@wikimedia.org>")
-        timeout = 10  # kill mwreverts.db.check if it runs more than 10 seconds
+        timeout = 10  # kill check_reverted_db if it runs more than 10 seconds
 
         # fetch revert info for each revision
         num_processes = 8  # use 8 processes
@@ -223,7 +265,7 @@ for wiki in active_wikis.dbname:
     conn.close()
 
 all_edits.to_csv(
-    'data/all_edits.tsv',
+    'data/baseline_ios/all_edits.tsv',
     sep='\t',
     index=False,
     quoting=csv.QUOTE_NONE)
