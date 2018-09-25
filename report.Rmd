@@ -65,7 +65,7 @@ This report is an initial exploration with two **goals**:
 
 *   **iOS new contributor retention rate**: For new iOS app editors of English and French Wikipedia, the second month retentions are `r paste(scales::percent(new_ios_editor_retention$retention_30[match(c("English", "French"), new_ios_editor_retention$language)]), collapse = " and ")` respectively. Since Korean, Czech and Hindi Wikipedia don’t have enough new editors, their retention rates are **unreliable**.
 
-*   **iOS active contributor retention rate**: For active iOS app editors of English and French Wikipedia, the second month retentions are `r paste(scales::percent(active_ios_editor_retention$retention_30[match(c("English", "French"), active_ios_editor_retention$language)]), collapse = " and ")` respectively. Since Korean, Czech and Hindi Wikipedia don’t have enough active editors, their retention rates are **unreliable**.
+*   **iOS contributor retention rate**: For all iOS app editors of English and French Wikipedia, the second month retentions are `r paste(scales::percent(active_ios_editor_retention$retention_30[match(c("English", "French"), active_ios_editor_retention$language)]), collapse = " and ")` respectively. Since Korean, Czech and Hindi Wikipedia don’t have enough editors, their retention rates are **unreliable**.
 
 
 ## Metrics
@@ -84,7 +84,7 @@ We also defined these **health monitoring metrics**:
 
 *   **Revert rate of iOS edits**: Proportion of iOS app edits which have been reverted. We will closely monitor revert rates for edits from the app to ensure that we are not increasing the burden on existing communities or reducing the quality of the projects. Although we expect some noise and fluctuation in this metric, it will need to remain roughly stable as we make changes.
 
-*   **iOS active contributor retention rate**: Number of active editors who have made additional edits through the iOS app in the N days following their first iOS edit in the given time span (does not include anonymous editors and editors who have only made additional edits through other platforms following their first iOS edit). 
+*   **iOS contributor retention rate**: Number of editors who have made additional edits through the iOS app in the N days following their first iOS edit in the given time span (does not include anonymous editors and editors who have only made additional edits through other platforms following their first iOS edit). 
 
 *   **iOS new contributor retention rate**: Number of new editors who have made additional edits through the iOS app in the N days following their first ever iOS edit (does not include anonymous editors and editors who have only made additional edits through other platforms following their first iOS edit). Platform-specific edit data was not available until June 29 via [T194424](https://phabricator.wikimedia.org/T194424). Prior to the deployment of the patch, all edits made in iOS and Android apps were lumped together under a single change tag "mobile app edit". Since multi-platform usage and platform switching are not common occurrences, any editor who has made a "mobile app edit"-tagged contribution previously is ineligible to be considered a new iOS editor.
 
@@ -529,7 +529,7 @@ DT::formatPercentage('Revert rate', 2)
 
 ## Retention
 
-Number of editors who have made additional edits through the iOS app in the N days following their first iOS edit in the given time span (does not include anonymous editors and editors who have only made additional edits through other platforms following their first iOS edit). If the target editor group is new iOS editors, the "first iOS edit" is the editor's first ever iOS edit, and the editors have not previously edited Wikipedia with either of the mobile apps (since edits from iOS and Android were not tagged separately until July 2018); if the target editor group is active iOS editors, the "first iOS edit" is the editor's first edit with the iOS app in a given time span. 
+Number of editors who have made additional edits through the iOS app in the N days following their first iOS edit in the given time span (does not include anonymous editors and editors who have only made additional edits through other platforms following their first iOS edit). If the target editor group is new iOS editors, the "first iOS edit" is the editor's first ever iOS edit, and the editors have not previously edited Wikipedia with either of the mobile apps (since edits from iOS and Android were not tagged separately until July 2018); if the target editor group is all iOS editors, the "first iOS edit" is the editor's first edit with the iOS app in a given time span. 
 
 [Traditionally](https://meta.wikimedia.org/wiki/Research:Surviving_new_editor), N is 30 days following 30 days' trial period, but we'd like to explore different trial and survival periods in this report and see how they impact the editor retention. **However**, the longer the trial + survival period is, the less eligible editors we have (we are *NOT* counting any editors whose trial periods haven't ended, *OR* any editors whose survival periods haven't ended and who haven't make any edit yet.), which means the retention we're computing is less reliable.
 
@@ -629,11 +629,11 @@ DT::datatable(
 DT::formatPercentage(c('First 7 days', '8th-14th day', 'First 15 days', '16th-30th day', 'First 30 days', '31st-60th day', 'First 60 days'), 2)
 ```
 
-### Active iOS editor retention
+### iOS editor retention
 
-An active iOS editors is any account that has made at least one edit with the iOS app since July 1st 2018.
+An iOS editors is any account that has made at least one edit with the iOS app since July 1st 2018, because edits from iOS and Android were not tagged separately until July 2018.
 
-The graph below shows the weekly retention of active editors since July 1st 2018 by target Wikipedias and other Wikipedias with more than 50 active editors since July 1st 2018. From the error bands, we can see that the retention rates are **unreliable** for wikis with small number of active editors.
+The graph below shows the weekly retention of all editors since July 1st 2018 by target Wikipedias and other Wikipedias with more than 50 editors since July 1st 2018. From the error bands, we can see that the retention rates are **unreliable** for wikis with small number of editors.
 
 ```{r active_editor_weekly_retention_plot}
 sd_active <- SharedData$new(active_editor_weekly_retention)
@@ -650,22 +650,22 @@ p <- ggplot(sd_active, aes(x = Week, y = Retention, group = Language, color = La
   scale_color_manual("Language", values = palette) +
   scale_fill_manual("Language", values = palette) +
   wmf::theme_min() +
-  labs(title = 'Weekly retention of active editors since July 1st 2018')
+  labs(title = 'Weekly retention of all editors since July 1st 2018')
 plotly::ggplotly(p, tooltip = c("label", "x", "y", "label2")) %>% 
   plotly::layout(
        margin = list(t=50, b = 100),
        annotations = list(
-         list(text = 'By target Wikipedias and other Wikipedias with more than 50 active editors since July 1st 2018, with 95% confidence intervals.',
+         list(text = 'By target Wikipedias and other Wikipedias with more than 50 editors since July 1st 2018, with 95% confidence intervals.',
               font = list(size = 12),
               showarrow = FALSE,
               xref = 'paper', x = 0,
               yref = 'paper', y = 1.05),
-         list(text = "*Global: Retention of active editors since July 1st 2018 across all wikis (unequally weighted).",
+         list(text = "*Global: Retention of all editors since July 1st 2018 across all wikis (unequally weighted).",
            font = list(size = 12),
            showarrow = FALSE,
            xref = 'paper', x = 1,
            yref = 'paper', y = -0.2),
-         list(text = "*Average: The average of active editors rententions of target Wikipedias and Wikipedias with more than 50 active editors since 2018-7-1 (equally weighted).",
+         list(text = "*Average: The average of all editors rententions of target Wikipedias and Wikipedias with more than 50 editors since 2018-7-1 (equally weighted).",
            font = list(size = 12),
            showarrow = FALSE,
            xref = 'paper', x = 1,
@@ -675,7 +675,7 @@ plotly::ggplotly(p, tooltip = c("label", "x", "y", "label2")) %>%
 ```
 <br>
 
-The following table shows various retention rates of active iOS app editors by all active Wikipedias since July 1st 2018. The second column shows the number of active editors we have so far, but not all of them are counted in the retention computation -- we are *NOT* counting any editors who haven't reached their survival periods, *OR* any editors whose survival periods haven't ended and who haven't make any edit yet. Also, please note that for wikis with small number of editors, the retention rate is **unreliable**.
+The following table shows various retention rates of all iOS app editors by all active Wikipedias since July 1st 2018. The second column shows the number of editors we have so far, but not all of them are counted in the retention computation -- we are *NOT* counting any editors who haven't reached their survival periods, *OR* any editors whose survival periods haven't ended and who haven't make any edit yet. Also, please note that for wikis with small number of editors, the retention rate is **unreliable**.
 
 <br>
 ```{r active_editor_retention_summary}
@@ -727,8 +727,8 @@ DT::formatPercentage(c('First 7 days', '8th-14th day', 'First 15 days', '16th-30
 
 - For new iOS app editors across all wikis, their first week retention is `r scales::percent(new_editor_weekly_retention$Retention[new_editor_weekly_retention$Language=="Global*" & new_editor_weekly_retention$Week==1])` and it drops to `r scales::percent(new_editor_weekly_retention$Retention[new_editor_weekly_retention$Language=="Global*" & new_editor_weekly_retention$Week==2])` in the second week, then stabilizes around `r scales::percent(mean(new_editor_weekly_retention$Retention[new_editor_weekly_retention$Language=="Global*" & new_editor_weekly_retention$Week>2]))`. We saw a similar pattern in English and French Wikipedia as well. For English Wikipedia, their new iOS editors weekly retentions are `r paste(scales::percent(new_editor_weekly_retention$Retention[new_editor_weekly_retention$Language=="English"]), collapse = ", ")` from week 1 to week 6. For French Wikipedia, their new iOS editors weekly retentions are `r paste(scales::percent(new_editor_weekly_retention$Retention[new_editor_weekly_retention$Language=="French"]), collapse = ", ")` from week 1 to week 6. Since Korean, Czech and Hindi Wikipedia don't have enough new editors, their retention rates are **unreliable**.
 - For new iOS app editors of English and French Wikipedia, the 31st-60th day retentions are `r paste(scales::percent(new_ios_editor_retention$retention_30[match(c("English", "French"), new_ios_editor_retention$language)]), collapse = " and ")` respectively, which is higher than the new editor retention across all wikis and platforms ([5.1% in August 2018](https://www.mediawiki.org/wiki/Wikimedia_Audiences#Contributors)). But please note that the birth dates of users are different for these metrics -- for retention across all wikis and platforms, the birth date is user's registration date; while for iOS new editor retention, the birth date is the date when users make their first ever edit with the iOS app.
-- For all active iOS app editors across all wikis, their first week retention is `r scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week==1])` and it drops to `r scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week==2])` in the second week, then stabilizes around `r scales::percent(mean(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week>2]))`. We saw a similar pattern in English Wikipedia as well. For English Wikipedia, their active iOS editors weekly retentions are `r paste(scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="English"]), collapse = ", ")` from week 1 to week 6. For French Wikipedia, their active iOS editors weekly retentions wobbles a bit -- `r paste(scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="French"]), collapse = ", ")` from week 1 to week 6. Since Korean, Czech and Hindi Wikipedia don't have enough active editors, their retention rates are **unreliable**.
-- For active iOS app editors of English and French Wikipedia, the 31st-60th day retentions are `r paste(scales::percent(active_ios_editor_retention$retention_30[match(c("English", "French"), active_ios_editor_retention$language)]), collapse = " and ")` respectively.
+- For all iOS app editors across all wikis, their first week retention is `r scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week==1])` and it drops to `r scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week==2])` in the second week, then stabilizes around `r scales::percent(mean(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="Global*" & active_editor_weekly_retention$Week>2]))`. We saw a similar pattern in English Wikipedia as well. For English Wikipedia, their iOS editors weekly retentions are `r paste(scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="English"]), collapse = ", ")` from week 1 to week 6. For French Wikipedia, their iOS editors weekly retentions wobbles a bit -- `r paste(scales::percent(active_editor_weekly_retention$Retention[active_editor_weekly_retention$Language=="French"]), collapse = ", ")` from week 1 to week 6. Since Korean, Czech and Hindi Wikipedia don't have enough editors, their retention rates are **unreliable**.
+- For all iOS app editors of English and French Wikipedia, the 31st-60th day retentions are `r paste(scales::percent(active_ios_editor_retention$retention_30[match(c("English", "French"), active_ios_editor_retention$language)]), collapse = " and ")` respectively.
 
 
 ```{r save_workspace}
