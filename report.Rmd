@@ -279,7 +279,7 @@ DT::formatPercentage('Percentage of All Edits', 2)
 
 For any given time period, of the non-bot registered users that completed at least 1 edit via the iOS app, we're interested in knowing how many edits did they complete on average (arithmetic mean/median). This metric will measure the efficiency of editing via the iOS app for existing editors, and we hope to increase it. Edits on other platform won’t affect this metric. Since it's very unlikely that a bot would use the app to edit, bot filter was not included in the query.
 
-Here we started by counting the number of edits per editor in July and August 2018 without doing any aggregation, since we want to see the distribution before determine whether we should use mean or median, or other aggregation metrics. The following graph shows the distribution of edits per editor per month in July and August 2018 by target Wikipedias. We can see that most editors only complete one edit per month.
+Here we started by counting the number of edits per editor in July, August and September 2018 without doing any aggregation, since we want to see the distribution before determine whether we should use mean or median, or other aggregation metrics. The following graph shows the distribution of edits per editor per month in July, August and September 2018 by target Wikipedias. We can see that most editors only complete one edit per month.
 
 ```{r target_edit_by_editor_data}
 target_wiki_edit_by_editor_pdata <- edits_per_editor_monthly %>%
@@ -304,12 +304,12 @@ target_wiki_edit_by_editor_pdata <- edits_per_editor_monthly %>%
 active_edit_by_editor_summary <- edits_per_editor_monthly %>%
   dplyr::group_by(`Language`=language) %>%
   dplyr::summarize(
-    `Number of registered editors (monthly average)` = length(local_user_id[local_user_id != 0 & edits != 0])/length(unique(month)),
+    `Number of registered editors (monthly average)` = round(length(local_user_id[local_user_id != 0 & edits != 0])/length(unique(month)), 2),
     `Average edits/editor/month` = round(mean(edits[local_user_id != 0]), 2), 
     `Median edits/editor/month` = median(edits[local_user_id != 0]),
     `1 edit/month editor proportion` = length(local_user_id[local_user_id != 0 & edits == 1]) / length(local_user_id[local_user_id != 0 & edits != 0]),
     `5+ edit/month editor proportion` = length(local_user_id[local_user_id != 0 & edits >= 5]) / length(local_user_id[local_user_id != 0 & edits != 0]),
-    `Anonymous edits (monthly average)` = sum(edits[local_user_id == 0])/length(unique(month)),
+    `Anonymous edits (monthly average)` = round(sum(edits[local_user_id == 0]) / length(unique(month)), 2),
     `Anonymous edits proportion` = sum(edits[local_user_id == 0]) / sum(edits)
     ) %>% 
   replace(., is.na(.), 0)
@@ -340,7 +340,7 @@ ggplot2::ggplot(data = target_wiki_edit_by_editor_pdata, aes(x = edits, y = n_ed
   ggplot2::geom_bar(stat = "identity", position = "dodge") +
   ggplot2::scale_fill_brewer("Month", palette = "Set1") +
   ggplot2::labs(y = 'Number of editors', x = 'Number of edits', 
-                title = 'Distribution of edits per editor per month in July and August 2018, by target Wikipedia') +
+                title = 'Distribution of edits per editor per month in July, August and September 2018, by target Wikipedia') +
   ggplot2::facet_wrap(~language, ncol=1, scales = "free_y") + 
   wmf::theme_facet(axis.text.x = element_text(angle = -20)) +
   geom_text(
@@ -381,7 +381,7 @@ p1 <- ggplot(target_editor_prop_1edit, aes(x=Language, y=mean)) +
     axis.title.y = element_blank()
   ) +
   labs(ylab="1 edit/month editor proportion", title = "Proportion of registered editors who only have 1 edit per month",
-       subtitle = "By target Wikipedias in July and August 2018, with 95% confidence intervals.",
+       subtitle = "By target Wikipedias in July, August and September 2018, with 95% confidence intervals.",
        caption="*Global: This red dash line represents the proportion of registered editors \nwho only have 1 edit/month on iOS app across all wikis (unequally weighted). \n *Average: This green dash line represents the average of the 1 edit editor proportion\n of wikis with more than 10 editors per month on iOS app (equally weighted).")
 
 target_editor_prop_5edit <- edits_per_editor_monthly %>%
@@ -407,7 +407,7 @@ p2 <- ggplot(target_editor_prop_5edit, aes(x=Language, y=mean)) +
     axis.title.y = element_blank()
   ) +
   labs(ylab="5+ edit/month editor proportion", title = "Proportion of registered editors who have at least 5 edits per month",
-       subtitle = "By target Wikipedias in July and August 2018, with 95% confidence intervals.",
+       subtitle = "By target Wikipedias in July, August and September 2018, with 95% confidence intervals.",
        caption="*Global: This red dash line represents the proportion of registered editors \nwho have 5+ edits/month on iOS app across all wikis (unequally weighted). \n *Average: This green dash line represents the average of the 5+ edits editor proportion\n of wikis with more than 10 editors per month on iOS app (equally weighted).")
 
 cowplot::plot_grid(p1, p2, nrow = 1)
