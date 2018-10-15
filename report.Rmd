@@ -731,6 +731,23 @@ DT::formatPercentage(c('First 7 days', '8th-14th day', 'First 15 days', '16th-30
 - For all iOS app editors of English and French Wikipedia, the 31st-60th day retentions are `r paste(scales::percent(active_ios_editor_retention$retention_30[match(c("English", "French"), active_ios_editor_retention$language)]), collapse = " and ")` respectively.
 
 
+## Appendix
+
+### iOS vs Android on target wikis
+
+![](figures/total_edits.png)
+
+![](figures/1edit_proportion.png)
+
+![](figures/5edit_proportion.png)
+
+![](figures/revert_rate.png)
+
+![](figures/new_editor_retention.png)
+
+![](figures/active_editor_retention.png)
+
+
 ```{r save_workspace}
 save.image("data/workspace.RData")
 ```

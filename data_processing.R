@@ -1,4 +1,4 @@
-all_edits <- read_tsv("data/all_edits.tsv", col_types = "Diliiilccl")
+all_edits <- read_tsv("data/ios_edits.tsv", col_types = "Diliiilccl")
 start_date <- min(all_edits$date)
 end_date <- max(all_edits$date)
 
